@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="貪">
+<meta name="theme-color" content="#0b0f1e">
+<title>貪</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-180.png">
+<style>
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none}
+  html,body{margin:0;height:100%;background:#0b0f1e;overflow:hidden;overscroll-behavior:none;touch-action:none;
+    font-family:-apple-system,"PingFang HK","PingFang TC","Noto Sans TC",sans-serif;color:#f3ead7}
+  canvas{position:fixed;inset:0;display:block}
+  #hud{position:fixed;left:0;right:0;top:0;padding:calc(env(safe-area-inset-top) + 10px) 14px 6px;display:none;pointer-events:none}
+  #hud .row{display:flex;justify-content:space-between;align-items:center;font-size:15px;font-weight:600}
+  #hud .pill{background:rgba(255,255,255,.08);border-radius:999px;padding:5px 11px}
+  #hud .gold{color:#ffcf3f}
+  #timebar{height:5px;border-radius:3px;background:rgba(255,255,255,.1);margin-top:9px;overflow:hidden}
+  #timebar i{display:block;height:100%;width:0;background:linear-gradient(90deg,#4a5bd6,#f6a14a)}
+  #calib{pointer-events:auto;border:0;background:rgba(255,255,255,.08);color:#f3ead7;font-size:13px;border-radius:999px;padding:5px 10px}
+  #bank{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom) + 18px);
+    width:min(78vw,340px);border:0;border-radius:20px;padding:12px 0 10px;display:none;
+    background:linear-gradient(180deg,#ffd75e,#e0a21b);color:#3a2500;box-shadow:0 6px 0 #8a5c00,0 10px 30px rgba(0,0,0,.4)}
+  #bank b{display:block;font-size:24px;letter-spacing:4px}
+  #bank span{font-size:14px;opacity:.85}
+  #bank:active{transform:translateX(-50%) translateY(4px);box-shadow:0 2px 0 #8a5c00}
+  #bank.hot{animation:pulse .5s infinite alternate}
+  @keyframes pulse{to{box-shadow:0 6px 0 #8a5c00,0 0 34px #ff6a3d}}
+  .ov{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:24px;
+    background:rgba(5,7,16,.78);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px)}
+  .card{width:min(100%,380px);text-align:center;max-height:100%;overflow:auto}
+  .card h1{font-size:88px;margin:0;line-height:1;color:#ffcf3f;text-shadow:0 0 30px rgba(255,190,40,.45);font-weight:800}
+  .card h2{font-size:28px;margin:0 0 12px;color:#ffcf3f}
+  .card p{line-height:1.6;margin:8px 0;font-size:15px;opacity:.9}
+  .sub{font-size:16px;opacity:.85;margin:12px 0 18px}
+  .rules{text-align:left;background:rgba(255,255,255,.06);border-radius:14px;padding:10px 14px;font-size:14px;line-height:1.7}
+  .btn{display:block;width:100%;border:0;border-radius:16px;padding:14px;margin-top:14px;font-size:19px;font-weight:700;
+    background:linear-gradient(180deg,#ffd75e,#e0a21b);color:#3a2500;box-shadow:0 5px 0 #8a5c00}
+  .btn:active{transform:translateY(3px);box-shadow:0 2px 0 #8a5c00}
+  .btn.ghost{background:rgba(255,255,255,.1);color:#f3ead7;box-shadow:none;font-size:16px}
+  .stats{display:grid;grid-template-columns:1fr auto;gap:6px 12px;text-align:left;background:rgba(255,255,255,.06);
+    border-radius:14px;padding:12px 16px;font-size:15px;margin:12px 0}
+  .stats b{text-align:right}
+  .neg{color:#ff7a6b}.pos{color:#8fe388}
+  .quote{font-size:16px;line-height:1.7;margin:16px 0;color:#f6dfa6}
+  .lb{font-size:13px;opacity:.8;margin-top:14px;text-align:left}
+  .lb div{display:flex;justify-content:space-between;padding:3px 4px;border-bottom:1px solid rgba(255,255,255,.07)}
+  .lb .me{color:#ffcf3f}
+  .ver{font-size:12px;opacity:.45;margin-top:16px}
+  .preview{font-size:14px;background:rgba(255,207,63,.1);border:1px solid rgba(255,207,63,.3);border-radius:12px;padding:8px 12px;margin-top:12px;text-align:left;line-height:1.6}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud">
+  <div class="row">
+    <span class="pill" id="hNight">第1晚</span>
+    <span class="pill gold" id="hWallet">💰 $0</span>
+    <span class="pill" id="hRent">租 $12</span>
+    <button id="calib">⟲ 校準</button>
+  </div>
+  <div id="timebar"><i id="hTime"></i></div>
+</div>
+<button id="bank"><b>收手</b><span id="bankVal">手上 $0</span></button>
+<div id="ov" class="ov"></div>
+
+<script>
+(() => {
+'use strict';
+const VERSION = 'v0.1.0';
+
+/* ---------- 可調參數 ---------- */
+const TYPES = {
+  cu: { name: '銅', val: 1,  m: 1,   r: 7,  col: '#c27a3a', rim: '#7d4a1d' },
+  ag: { name: '銀', val: 3,  m: 1.5, r: 8,  col: '#dfe4ec', rim: '#8790a0' },
+  au: { name: '金', val: 8,  m: 2.5, r: 9,  col: '#ffcf3f', rim: '#a87a06' },
+  di: { name: '鑽', val: 25, m: 3,   r: 8,  col: '#7ef3ff', rim: '#2496b3' },
+  rk: { name: '石', val: 0,  m: 5,   r: 11, col: '#70747d', rim: '#41444b' },
+};
+function nightCfg(n) {
+  const k = n - 1;
+  return {
+    rent: Math.round(12 + 10 * k + 2.5 * k * k),
+    cap: 18 + 3 * k,
+    capVar: Math.min(0.25, 0.10 + 0.02 * k),
+    dur: 35,
+    spawn: Math.max(0.36, 0.9 - 0.06 * k),
+    weights: {
+      cu: Math.max(1, 6 - n),
+      ag: 3,
+      au: n >= 2 ? 1 + 0.5 * (n - 2) : 0,
+      di: n >= 5 ? 0.3 + 0.15 * (n - 5) : 0,
+      rk: n >= 3 ? 0.8 + 0.2 * (n - 3) : 0,
+    },
+    wind: n >= 4,
+    wobble: 1.2 + 0.25 * n,
+  };
+}
+const NEWS = {
+  2: '🟡 金幣出現：值錢，但重。',
+  3: '🪨 石頭出現：一文不值又好重——可以傾側倒走佢。',
+  4: '🌬 開始起風：托盤會被吹歪。',
+  5: '💎 鑽石出現：天光前最多。',
+};
+const FRICTION_DEG = 5;     // 細過呢個角度，錢唔會滑
+const MOVE_SPEED = 0.04;    // 托盤移動：每度每秒 W 嘅比例
+const IMB_K = 0.5;          // 偏重對傾斜嘅影響（度 / 重量單位，在盡頭）
+
+/* ---------- 畫布 ---------- */
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+let W, H, DPR, U, L, TY, PH;
+let stars = [];
+function resize() {
+  DPR = Math.min(3, window.devicePixelRatio || 1);
+  W = innerWidth; H = innerHeight;
+  cv.width = W * DPR; cv.height = H * DPR;
+  cv.style.width = W + 'px'; cv.style.height = H + 'px';
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  U = Math.min(W, 520) / 390;
+  L = Math.min(W * 0.7, 380);
+  TY = H * 0.62;
+  PH = 5 * U;
+  stars = Array.from({ length: 70 }, () => ({ x: Math.random() * W, y: Math.random() * H * 0.7, r: Math.random() * 1.3 + 0.3, p: Math.random() * 6 }));
+}
+addEventListener('resize', resize);
+resize();
+
+/* ---------- 聲音 ---------- */
+let AC = null;
+function audioInit() {
+  try { if (!AC) AC = new (window.AudioContext || window.webkitAudioContext)(); if (AC.state === 'suspended') AC.resume(); } catch (e) {}
+}
+function tone(f, d = 0.12, type = 'sine', vol = 0.12, delay = 0) {
+  if (!AC) return;
+  const t = AC.currentTime + delay, o = AC.createOscillator(), g = AC.createGain();
+  o.type = type; o.frequency.setValueAtTime(f, t);
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + d);
+  o.connect(g); g.connect(AC.destination); o.start(t); o.stop(t + d + 0.03);
+}
+function noise(d = 0.5, vol = 0.35) {
+  if (!AC) return;
+  const n = Math.floor(AC.sampleRate * d), b = AC.createBuffer(1, n, AC.sampleRate), a = b.getChannelData(0);
+  for (let i = 0; i < n; i++) a[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / n, 2);
+  const s = AC.createBufferSource(), g = AC.createGain(); s.buffer = b; g.gain.value = vol;
+  s.connect(g); g.connect(AC.destination); s.start();
+}
+
+/* ---------- 輸入 ---------- */
+let gamma = 0, gammaS = 0, hasSensor = false, calib = 0, calibPending = true, sensorHooked = false;
+let touchTilt = null, touchStartX = 0, keyTilt = 0;
+function onOri(e) { if (e.gamma == null) return; gamma = e.gamma; if (!hasSensor) { hasSensor = true; gammaS = gamma; } }
+function requestSensor() {
+  try {
+    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+      DeviceOrientationEvent.requestPermission().then(r => { if (r === 'granted') hookSensor(); }).catch(() => {});
+    } else hookSensor();
+  } catch (e) {}
+}
+function hookSensor() { if (sensorHooked) return; sensorHooked = true; addEventListener('deviceorientation', onOri); }
+function getTilt() {
+  if (touchTilt !== null) return touchTilt;
+  if (keyTilt) return keyTilt;
+  if (hasSensor) return clamp(gammaS - calib, -35, 35);
+  return 0;
+}
+function doCalib() { calib = gammaS; calibPending = !hasSensor; }
+function tx(e) { return (e.touches && e.touches[0] ? e.touches[0].clientX : e.clientX); }
+cv.addEventListener('touchstart', e => { e.preventDefault(); touchStartX = tx(e); touchTilt = 0; }, { passive: false });
+cv.addEventListener('touchmove', e => { e.preventDefault(); touchTilt = clamp((tx(e) - touchStartX) / (W * 0.22) * 30, -30, 30); }, { passive: false });
+cv.addEventListener('touchend', e => { e.preventDefault(); touchTilt = null; }, { passive: false });
+let mouseDown = false;
+cv.addEventListener('mousedown', e => { mouseDown = true; touchStartX = e.clientX; touchTilt = 0; });
+addEventListener('mousemove', e => { if (mouseDown) touchTilt = clamp((e.clientX - touchStartX) / (W * 0.22) * 30, -30, 30); });
+addEventListener('mouseup', () => { mouseDown = false; touchTilt = null; });
+addEventListener('keydown', e => {
+  if (e.key === 'ArrowLeft') keyTilt = -15; if (e.key === 'ArrowRight') keyTilt = 15;
+  if (e.key === ' ' && night && !night.ended) bank(false);
+});
+addEventListener('keyup', e => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') keyTilt = 0; });
+document.addEventListener('gesturestart', e => e.preventDefault());
+
+/* ---------- 工具 ---------- */
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const rand = (a, b) => a + Math.random() * (b - a);
+const D2R = Math.PI / 180;
+function pick(w) {
+  let tot = 0; for (const k in w) tot += w[k];
+  let r = Math.random() * tot;
+  for (const k in w) { r -= w[k]; if (r <= 0) return k; }
+  return 'cu';
+}
+
+/* ---------- 狀態 ---------- */
+let st = null, night = null, playing = false, paused = false;
+const $ = id => document.getElementById(id);
+const ov = $('ov'), hud = $('hud'), bankBtn = $('bank');
+
+function newGame() {
+  st = { n: 0, wallet: 10, banked: 0, lostBreak: 0, lostSpill: 0, maxHeld: 0, breaks: 0, ratios: [] };
+  startNight();
+}
+function startNight() {
+  st.n++;
+  const c = nightCfg(st.n);
+  night = {
+    c, t: 0, ended: false, result: null,
+    capActual: c.cap * (1 + rand(-c.capVar, c.capVar)),
+    tx: W / 2, th: 0, kick: 0,
+    coins: [], falling: [], spill: [], floats: [], fly: [],
+    spawnT: 0.6, windNext: rand(3, 6), windT: 0, windDur: 1.6, windDir: 1, windStr: 0,
+    broken: null, cracks: makeCracks(),
+  };
+  doCalib();
+  hideOv(); hud.style.display = 'block'; bankBtn.style.display = 'block';
+  playing = true; paused = false;
+}
+function makeCracks() {
+  return Array.from({ length: 6 }, (_, i) => {
+    const s = rand(-0.42, 0.42); const pts = [[s, -1]]; let x = s;
+    for (let j = 0; j < 3; j++) { x += rand(-0.03, 0.03); pts.push([x, -1 + (j + 1) * 0.66]); }
+    return pts;
+  });
+}
+const held = () => night.coins.reduce((a, c) => a + TYPES[c.t].val, 0);
+const load = () => night.coins.reduce((a, c) => a + TYPES[c.t].m, 0);
+
+/* ---------- 更新 ---------- */
+function update(dt) {
+  const N = night, c = N.c;
+  gammaS += (gamma - gammaS) * Math.min(1, dt * 12);
+  if (calibPending && hasSensor) { calib = gammaS; calibPending = false; }
+
+  if (!N.ended) N.t += dt;
+  const tilt = N.ended ? 0 : getTilt();
+  const ld = load(), ratio = ld / c.cap;
+
+  // 偏重
+  let imb = 0;
+  for (const k of N.coins) imb += TYPES[k.t].m * (k.s / (L / 2));
+  imb *= IMB_K;
+  // 搖晃（越重越搖）
+  const wob = c.wobble * Math.pow(Math.min(ratio, 1.3), 1.8) * (0.6 * Math.sin(N.t * 5.1) + 0.4 * Math.sin(N.t * 8.7 + 1));
+  // 風
+  let windDeg = 0;
+  if (c.wind && !N.ended) {
+    if (N.windT > 0) {
+      N.windT -= dt;
+      windDeg = N.windDir * N.windStr * Math.sin(Math.PI * (1 - N.windT / N.windDur));
+      if (N.windT <= 0) N.windNext = rand(4, 8);
+    } else {
+      N.windNext -= dt;
+      if (N.windNext <= 0) { N.windT = N.windDur; N.windDir = Math.random() < 0.5 ? -1 : 1; N.windStr = Math.min(9, 4 + st.n * 0.4); }
+    }
+  }
+  N.kick *= Math.exp(-6 * dt);
+  const thT = N.broken ? N.th : tilt * 0.75 + imb + wob + windDeg + N.kick;
+  N.th += (thT - N.th) * Math.min(1, dt * 9);
+  if (!N.broken) N.tx = clamp(N.tx + N.th * MOVE_SPEED * W * dt, W * 0.2, W * 0.8);
+
+  const th = N.th * D2R, co = Math.cos(th), si = Math.sin(th);
+  const G = 1100 * U;
+
+  // 托盤上嘅錢
+  if (!N.broken) {
+    for (const k of N.coins) {
+      if (Math.abs(N.th) < FRICTION_DEG && Math.abs(k.v) < 25 * U) k.v *= Math.exp(-16 * dt);
+      else { k.v += G * si * dt; k.v *= Math.exp(-1.6 * dt); }
+      k.s += k.v * dt;
+    }
+    for (let it = 0; it < 3; it++) {
+      N.coins.sort((a, b) => a.s - b.s);
+      for (let i = 0; i < N.coins.length - 1; i++) {
+        const a = N.coins[i], b = N.coins[i + 1], ra = TYPES[a.t].r * U, rb = TYPES[b.t].r * U, ma = TYPES[a.t].m, mb = TYPES[b.t].m;
+        const d = b.s - a.s, mn = ra + rb;
+        if (d < mn) {
+          const o = mn - d; a.s -= o * mb / (ma + mb); b.s += o * ma / (ma + mb);
+          if (a.v > b.v) { const v = (a.v * ma + b.v * mb) / (ma + mb); a.v = b.v = v; }
+        }
+      }
+    }
+    // 跌出邊
+    for (let i = N.coins.length - 1; i >= 0; i--) {
+      const k = N.coins[i];
+      if (Math.abs(k.s) > L / 2) {
+        N.coins.splice(i, 1);
+        const p = coinPos(k, co, si);
+        N.spill.push({ t: k.t, x: p.x, y: p.y, vx: k.v * co, vy: k.v * si, rot: 0 });
+        if (!N.ended) st.lostSpill += TYPES[k.t].val;
+        tone(220, 0.15, 'triangle', 0.06);
+      }
+    }
+    // 斷
+    if (!N.ended && load() > N.capActual) breakTray(co, si);
+    const h = held(); if (h > st.maxHeld) st.maxHeld = h;
+  }
+
+  // 落緊嘅錢
+  for (let i = N.falling.length - 1; i >= 0; i--) {
+    const f = N.falling[i], r = TYPES[f.t].r * U;
+    const py = f.y;
+    f.vy += 520 * U * dt; f.y += f.vy * dt;
+    if (windDeg) f.x += Math.sign(windDeg) * W * 0.12 * dt;
+    f.rot += dt * 2;
+    if (!N.broken && !N.ended) {
+      const s = (f.x - N.tx) / co;
+      if (Math.abs(s) <= L / 2 - r * 0.3) {
+        const cy = TY + s * si - (r + PH) * co;
+        if (f.y >= cy && py <= cy + 8 * U) {
+          N.falling.splice(i, 1);
+          N.coins.push({ t: f.t, s, v: 0 });
+          N.kick += TYPES[f.t].m * (s / (L / 2)) * 2.2;
+          const T = TYPES[f.t];
+          tone({ cu: 900, ag: 1300, au: 1600, di: 2100, rk: 160 }[f.t], f.t === 'rk' ? 0.2 : 0.09, f.t === 'rk' ? 'square' : 'sine', 0.08);
+          if (T.val) N.floats.push({ x: f.x, y: cy - 16 * U, txt: '+$' + T.val, col: T.col, t: 0 });
+          else N.floats.push({ x: f.x, y: cy - 16 * U, txt: '好重！', col: '#aab', t: 0 });
+          continue;
+        }
+      }
+    }
+    if (f.y > H + 40) N.falling.splice(i, 1);
+  }
+
+  // 生錢
+  if (!N.ended) {
+    N.spawnT -= dt;
+    if (N.spawnT <= 0) {
+      const late = N.t > c.dur - 12;
+      const w = Object.assign({}, c.weights);
+      if (late) { w.au *= 2; w.di *= 2.5; }
+      const tpe = pick(w);
+      N.falling.push({ t: tpe, x: rand(W * 0.08, W * 0.92), y: -20, vy: 60 * U, rot: rand(0, 6) });
+      N.spawnT = c.spawn * (late ? 0.7 : 1) * rand(0.7, 1.3);
+    }
+    if (N.t >= c.dur) bank(true);
+  }
+
+  // 跌落嘅錢 / 碎片
+  for (let i = N.spill.length - 1; i >= 0; i--) {
+    const s = N.spill[i]; s.vy += 900 * U * dt; s.x += s.vx * dt; s.y += s.vy * dt; s.rot += dt * 6;
+    if (s.y > H + 50) N.spill.splice(i, 1);
+  }
+  if (N.broken) {
+    N.broken.t += dt;
+    for (const h of N.broken.halves) { h.vy += 900 * U * dt; h.x += h.vx * dt; h.y += h.vy * dt; h.a += h.va * dt; }
+    if (N.broken.t > 1.5 && !N.result) finishNight();
+  }
+  for (let i = N.floats.length - 1; i >= 0; i--) { N.floats[i].t += dt; if (N.floats[i].t > 0.9) N.floats.splice(i, 1); }
+  for (let i = N.fly.length - 1; i >= 0; i--) { N.fly[i].t += dt * 1.6; if (N.fly[i].t >= 1) N.fly.splice(i, 1); }
+  if (N.ended && !N.broken && !N.result && N.fly.length === 0 && N.endT !== undefined && (N.endT += dt) > 0.4) finishNight();
+
+  // HUD
+  $('hNight').textContent = '第' + st.n + '晚';
+  $('hWallet').textContent = '💰 $' + st.wallet;
+  $('hRent').textContent = '租 $' + c.rent;
+  $('hTime').style.width = Math.min(100, N.t / c.dur * 100) + '%';
+  $('bankVal').textContent = '手上 $' + held();
+  bankBtn.classList.toggle('hot', !N.ended && ratio > 0.85);
+}
+function coinPos(k, co, si) {
+  const r = TYPES[k.t].r * U;
+  return { x: night.tx + k.s * co + (r + PH) * si, y: TY + k.s * si - (r + PH) * co };
+}
+
+/* ---------- 收手 / 斷 ---------- */
+function bank(auto) {
+  const N = night; if (N.ended) return;
+  N.ended = true; N.endT = 0;
+  const co = Math.cos(N.th * D2R), si = Math.sin(N.th * D2R);
+  const v = held();
+  st.ratios.push(load() / N.c.cap);
+  for (const k of N.coins) { const p = coinPos(k, co, si); N.fly.push({ t: 0, x: p.x, y: p.y, k: k.t }); }
+  N.coins = [];
+  N.result = null; N.income = v; N.auto = auto;
+  [660, 880, 1100, 1320].forEach((f, i) => tone(f, 0.15, 'sine', 0.1, i * 0.06));
+}
+function breakTray(co, si) {
+  const N = night;
+  N.ended = true;
+  const lost = held();
+  st.lostBreak += lost; st.breaks++;
+  for (const k of N.coins) { const p = coinPos(k, co, si); N.spill.push({ t: k.t, x: p.x, y: p.y, vx: rand(-200, 200) * U, vy: rand(-350, -100) * U, rot: 0 }); }
+  N.coins = [];
+  N.broken = { t: 0, lost, halves: [
+    { side: -1, x: N.tx - L / 4 * co, y: TY - L / 4 * si, vx: -90 * U, vy: -120 * U, a: N.th * D2R, va: -2.5 },
+    { side: 1,  x: N.tx + L / 4 * co, y: TY + L / 4 * si, vx: 90 * U,  vy: -120 * U, a: N.th * D2R, va: 2.5 },
+  ] };
+  N.income = 0;
+  noise(0.6, 0.4); tone(90, 0.5, 'sawtooth', 0.12);
+}
+function finishNight() {
+  const N = night; N.result = true;
+  playing = false;
+  hud.style.display = 'none'; bankBtn.style.display = 'none';
+  const inc = N.income || 0;
+  st.banked += inc;
+  st.wallet += inc - N.c.rent;
+  if (st.wallet < 0) return gameOver();
+  const head = N.broken
+    ? `<h2>托盤斷咗！</h2><p class="neg">手上 $${N.broken.lost} 全部冇晒。</p>`
+    : `<h2>${N.auto ? '天光，收工' : '收手'}</h2>`;
+  const nxt = NEWS[st.n + 1] ? `<div class="preview">明晚：${NEWS[st.n + 1]}</div>` : '';
+  const nc = nightCfg(st.n + 1);
+  showOv(`<div class="card">${head}
+    <div class="stats">
+      <span>第${st.n}晚收入</span><b class="pos">+$${inc}</b>
+      <span>交租</span><b class="neg">−$${N.c.rent}</b>
+      <span>錢包</span><b>$${st.wallet}</b>
+      <span>明晚租金</span><b>$${nc.rent}</b>
+    </div>${nxt}
+    <button class="btn" id="next">第${st.n + 1}晚 →</button></div>`);
+  $('next').onclick = () => { audioInit(); startNight(); };
+}
+
+/* ---------- 結局 ---------- */
+function reflect() {
+  const avg = st.ratios.length ? st.ratios.reduce((a, b) => a + b, 0) / st.ratios.length : 0;
+  const lost = st.lostBreak + st.lostSpill;
+  if (st.breaks >= 2 && st.lostBreak > st.banked * 0.4) return '你失去嘅，差唔多同你得到嘅一樣多。<br>每一次都係「再接多個先」。';
+  if (st.breaks === 0 && avg < 0.6) return '你好識收手，一次都冇斷過。<br>但係租金唔會等你——太保守，都係一種代價。';
+  if (st.breaks === 0) return '你一次都冇斷過，又夠膽。<br>係運氣，定係你真係知道幾時停？';
+  if (lost > st.banked) return `你一共跌咗 $${lost}，多過你袋落袋嘅 $${st.banked}。<br>錢唔係唔夠，係揸唔住。`;
+  return `你曾經一次過揸住 $${st.maxHeld}。<br>最後，手入面剩低幾多？`;
+}
+function lbLoad() { try { return JSON.parse(localStorage.getItem('tam_lb') || '[]'); } catch (e) { return []; } }
+function lbSave(a) { try { localStorage.setItem('tam_lb', JSON.stringify(a)); } catch (e) {} }
+function lbHtml(lb, me) {
+  if (!lb.length) return '';
+  return '<div class="lb"><div><span>🏆 紀錄</span><span></span></div>' + lb.map((e, i) =>
+    `<div class="${e === me ? 'me' : ''}"><span>${i + 1}. 撐到第${e.nights}晚</span><span>賺 $${e.banked} · ${e.date}</span></div>`).join('') + '</div>';
+}
+function gameOver() {
+  const nights = st.n - 1;
+  const d = new Date(), me = { nights, banked: st.banked, date: `${d.getDate()}/${d.getMonth() + 1}` };
+  let lb = lbLoad(); lb.push(me); lb.sort((a, b) => b.nights - a.nights || b.banked - a.banked); lb = lb.slice(0, 5); lbSave(lb);
+  showOv(`<div class="card"><h2>交唔起租，破產</h2>
+    <div class="stats">
+      <span>撐到</span><b>第${nights}晚</b>
+      <span>總共袋落袋</span><b class="pos">$${st.banked}</b>
+      <span>托盤斷咗</span><b>${st.breaks} 次</b>
+      <span>斷托盤冇咗</span><b class="neg">$${st.lostBreak}</b>
+      <span>滑走咗</span><b class="neg">$${st.lostSpill}</b>
+      <span>最多一次揸住</span><b>$${st.maxHeld}</b>
+    </div>
+    <div class="quote">${reflect()}</div>
+    <button class="btn" id="again">再嚟一次</button>
+    <button class="btn ghost" id="home">主頁</button>
+    ${lbHtml(lb, lb.includes(me) ? me : null)}</div>`);
+  $('again').onclick = () => { audioInit(); newGame(); };
+  $('home').onclick = home;
+}
+function home() {
+  playing = false; night = null;
+  hud.style.display = 'none'; bankBtn.style.display = 'none';
+  showOv(`<div class="card"><h1>貪</h1>
+    <div class="sub">接得越多，越重。<br>幾時收手，你話事。</div>
+    <div class="rules">
+      📱 左右傾側手機：托盤會跟住斜同移動<br>
+      🪙 接住跌落嚟嘅錢，但係斜得太勁，錢會滑走<br>
+      ⚖️ 越重越搖，超過上限托盤就會<b>斷</b>（上限有少少運氣）<br>
+      ✋ 撳「收手」先算袋落袋，今晚就收工<br>
+      🏠 每晚要交租，交唔起就破產
+    </div>
+    <button class="btn" id="start">開始</button>
+    <p style="font-size:12px;opacity:.6;margin-top:10px">冇重力感應？用手指喺畫面左右拖都得。</p>
+    ${lbHtml(lbLoad(), null)}
+    <div class="ver">${VERSION}</div></div>`);
+  $('start').onclick = () => { requestSensor(); audioInit(); newGame(); };
+}
+function showOv(h) { ov.innerHTML = h; ov.style.display = 'flex'; }
+function hideOv() { ov.style.display = 'none'; ov.innerHTML = ''; }
+$('bank').addEventListener('click', () => { if (night && !night.ended) bank(false); });
+$('calib').addEventListener('click', () => { doCalib(); tone(1000, 0.08); });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && playing && night && !night.ended) {
+    paused = true;
+    showOv(`<div class="card"><h2>暫停</h2><button class="btn" id="resume">繼續</button></div>`);
+    $('resume').onclick = () => { audioInit(); hideOv(); paused = false; last = performance.now(); };
+  }
+});
+
+/* ---------- 繪畫 ---------- */
+function drawCoin(t, x, y, rot, alpha = 1) {
+  const T = TYPES[t], r = T.r * U;
+  ctx.save(); ctx.globalAlpha = alpha; ctx.translate(x, y); ctx.rotate(rot);
+  if (t === 'di') {
+    ctx.beginPath(); ctx.moveTo(0, -r * 1.15); ctx.lineTo(r, -r * 0.2); ctx.lineTo(0, r * 1.15); ctx.lineTo(-r, -r * 0.2); ctx.closePath();
+    ctx.fillStyle = T.col; ctx.shadowColor = T.col; ctx.shadowBlur = 10 * U; ctx.fill(); ctx.shadowBlur = 0;
+    ctx.strokeStyle = T.rim; ctx.lineWidth = 1.5 * U; ctx.stroke();
+  } else if (t === 'rk') {
+    ctx.beginPath();
+    for (let i = 0; i < 7; i++) { const a = i / 7 * Math.PI * 2, rr = r * (0.8 + ((i * 37) % 10) / 40); ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr); }
+    ctx.closePath(); ctx.fillStyle = T.col; ctx.fill(); ctx.strokeStyle = T.rim; ctx.lineWidth = 2 * U; ctx.stroke();
+  } else {
+    ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fillStyle = T.col; ctx.fill();
+    ctx.strokeStyle = T.rim; ctx.lineWidth = 1.8 * U; ctx.stroke();
+    ctx.fillStyle = T.rim; ctx.font = `700 ${r * 1.1}px -apple-system,"PingFang HK",sans-serif`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(T.name, 0, r * 0.08);
+  }
+  ctx.restore();
+}
+function drawPlank(cx, cy, a, len, ratio, half) {
+  ctx.save(); ctx.translate(cx, cy); ctx.rotate(a);
+  const g = ctx.createLinearGradient(0, -PH, 0, PH); g.addColorStop(0, '#c08b52'); g.addColorStop(1, '#7a4f26');
+  ctx.fillStyle = g; ctx.fillRect(-len / 2, -PH, len, PH * 2);
+  ctx.strokeStyle = 'rgba(0,0,0,.35)'; ctx.lineWidth = 1; ctx.strokeRect(-len / 2, -PH, len, PH * 2);
+  if (!half && ratio > 0.55) {
+    const n = ratio > 0.95 ? 6 : ratio > 0.8 ? 4 : 2;
+    ctx.strokeStyle = ratio > 0.95 ? '#2a0f00' : 'rgba(40,15,0,.75)'; ctx.lineWidth = 1.3 * U;
+    for (let i = 0; i < n; i++) {
+      const pts = night.cracks[i]; ctx.beginPath();
+      pts.forEach(([px, py], j) => { const X = px * len, Y = py * PH; j ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); }); ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+function draw() {
+  const N = night;
+  const p = N ? Math.min(1, N.t / N.c.dur) : 0;
+  // 天色：夜 → 天光
+  const sky = ctx.createLinearGradient(0, 0, 0, H);
+  const lerp = (a, b) => a.map((v, i) => Math.round(v + (b[i] - v) * p));
+  const top = lerp([11, 15, 30], [40, 52, 98]), bot = lerp([24, 22, 48], [214, 128, 84]);
+  sky.addColorStop(0, `rgb(${top})`); sky.addColorStop(1, `rgb(${bot})`);
+  ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
+  const now = performance.now() / 1000;
+  for (const s of stars) { ctx.globalAlpha = (0.4 + 0.6 * Math.abs(Math.sin(now + s.p))) * (1 - p * 0.9); ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, 7); ctx.fill(); }
+  ctx.globalAlpha = 1 - p * 0.7; ctx.fillStyle = '#f6efd2'; ctx.beginPath(); ctx.arc(W * 0.82, H * 0.13 + p * H * 0.2, 22 * U, 0, 7); ctx.fill(); ctx.globalAlpha = 1;
+  if (!N) return;
+
+  const th = N.th * D2R, co = Math.cos(th), si = Math.sin(th);
+  const ratio = load() / N.c.cap;
+
+  // 風
+  if (N.windT > 0) {
+    ctx.save(); ctx.globalAlpha = 0.5; ctx.strokeStyle = '#cfe3ff'; ctx.lineWidth = 2 * U;
+    for (let i = 0; i < 6; i++) {
+      const y = H * (0.2 + i * 0.08), off = ((now * 400 * U + i * 90) % (W + 200)) - 100;
+      const x = N.windDir > 0 ? off : W - off;
+      ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + N.windDir * 60 * U, y); ctx.stroke();
+    }
+    ctx.restore();
+    ctx.fillStyle = '#cfe3ff'; ctx.font = `600 ${15 * U}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText(N.windDir > 0 ? '起風 →' : '← 起風', W / 2, H * 0.16);
+  }
+
+  for (const f of N.falling) drawCoin(f.t, f.x, f.y, f.rot);
+
+  // 托盤
+  if (N.broken) {
+    for (const h of N.broken.halves) drawPlank(h.x, h.y, h.a, L / 2, 0, true);
+  } else {
+    drawPlank(N.tx, TY, th, L, ratio, false);
+    for (const k of N.coins) { const q = coinPos(k, co, si); drawCoin(k.t, q.x, q.y, th); }
+  }
+  for (const s of N.spill) drawCoin(s.t, s.x, s.y, s.rot, 0.85);
+
+  // 收錢飛去錢包
+  for (const f of N.fly) {
+    const e = 1 - Math.pow(1 - f.t, 3), x = f.x + (W * 0.5 - f.x) * e, y = f.y + (40 - f.y) * e;
+    drawCoin(f.k, x, y, 0, 1 - f.t * 0.5);
+  }
+
+  // 重量計
+  if (!N.broken && !N.ended) {
+    const bw = W * 0.62, bx = (W - bw) / 2, by = TY + 54 * U, bh = 9 * U, max = 1.35;
+    ctx.fillStyle = 'rgba(255,255,255,.1)'; ctx.fillRect(bx, by, bw, bh);
+    const lo = (1 - N.c.capVar) / max, hi = (1 + N.c.capVar) / max;
+    ctx.fillStyle = 'rgba(255,80,60,.28)'; ctx.fillRect(bx + bw * lo, by, bw * (hi - lo), bh);
+    const fr = Math.min(1, ratio / max);
+    ctx.fillStyle = ratio > 0.9 ? '#ff5a3c' : ratio > 0.7 ? '#f6a14a' : '#8fe388';
+    ctx.fillRect(bx, by, bw * fr, bh);
+    ctx.fillStyle = 'rgba(255,255,255,.75)'; ctx.font = `${12 * U}px -apple-system,sans-serif`; ctx.textAlign = 'left';
+    ctx.fillText('負重', bx, by - 6 * U);
+    ctx.textAlign = 'right'; ctx.fillText('紅區＝可能會斷', bx + bw, by - 6 * U);
+  }
+
+  // 浮字
+  for (const f of N.floats) {
+    ctx.globalAlpha = 1 - f.t / 0.9; ctx.fillStyle = f.col; ctx.font = `700 ${14 * U}px -apple-system,sans-serif`; ctx.textAlign = 'center';
+    ctx.fillText(f.txt, f.x, f.y - f.t * 30 * U);
+  }
+  ctx.globalAlpha = 1;
+
+  if (N.t < 3 && st.n === 1) {
+    ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.font = `600 ${16 * U}px -apple-system,sans-serif`; ctx.textAlign = 'center';
+    ctx.fillText(hasSensor ? '傾側手機接錢' : '手指左右拖動接錢', W / 2, H * 0.3);
+  }
+}
+
+/* ---------- 主迴圈 ---------- */
+let last = performance.now();
+function loop(now) {
+  const dt = Math.min(0.033, (now - last) / 1000); last = now;
+  if (night && !paused && (playing || night.ended)) { if (!night.result) update(dt); }
+  draw();
+  requestAnimationFrame(loop);
+}
+home();
+requestAnimationFrame(loop);
+if ('serviceWorker' in navigator) { try { navigator.serviceWorker.register('sw.js').catch(() => {}); } catch (e) {} }
+})();
+</script>
+</body>
+</html>
